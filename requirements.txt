@@ -1,1 +1,8 @@
-streamlit>=1.28.0
+streamlit>=1.30.0
+pandas
+numpy
+plotly  # 데이터 시각화용
+requests
+python-dotenv
+langchain  # AI 에이전트 기능 대응
+openai     # LLM 연동 대비
