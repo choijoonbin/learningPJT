@@ -1,0 +1,15 @@
+/* assets/style.css */
+.stApp {
+    background-color: #f8f9fa;
+}
+
+.stChatMessage {
+    border-radius: 15px;
+    padding: 10px;
+}
+
+/* 사이드바 스타일 커스텀 */
+[data-testid="stSidebar"] {
+    background-image: linear-gradient(#2e3b4e, #1c2531);
+    color: white;
+}
