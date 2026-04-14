@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Enterprise Agentic AI — Full Stack
 # Planes: P01(edge_api:8000) P02(control_plane:8001) P04(mcp_server:8002)
 #         P05(knowledge_api:8003) P03(agent_worker:8004)
