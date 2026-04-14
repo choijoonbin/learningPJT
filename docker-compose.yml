@@ -1,0 +1,129 @@
+version: "3.9"
+
+# Enterprise Agentic AI — Full Stack
+# Planes: P01(edge_api:8000) P02(control_plane:8001) P04(mcp_server:8002)
+#         P05(knowledge_api:8003) P03(agent_worker:8004)
+# Infra:  PostgreSQL(pgvector), Redis
+
+services:
+
+  # ─── Infrastructure ────────────────────────────────────────────────────────
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB:       agentic_ai
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── P01 Edge & Trust Boundary ─────────────────────────────────────────────
+
+  edge_api:
+    build:
+      context: ./services/edge_api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      JWT_SECRET_KEY:       ${JWT_SECRET_KEY:-dev-secret-change-in-production}
+      JWT_ALGORITHM:        HS256
+      JWT_EXPIRE_MINUTES:   60
+      CONTROL_PLANE_URL:    http://control_plane:8001
+      HIGH_RISK_THRESHOLD:  ${HIGH_RISK_THRESHOLD:-0.7}
+      REQUIRE_HITL_ABOVE:   ${REQUIRE_HITL_ABOVE:-0.8}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── P02 Control Plane ─────────────────────────────────────────────────────
+
+  control_plane:
+    build:
+      context: ./services/control_plane
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      REDIS_URL:           redis://redis:6379/0
+      AGENT_WORKER_URL:    http://agent_worker:8004
+      ANTHROPIC_API_KEY:   ${ANTHROPIC_API_KEY}
+      REQUIRE_HITL_ABOVE:  ${REQUIRE_HITL_ABOVE:-0.8}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── P03 Domain Agent Runtime ──────────────────────────────────────────────
+
+  agent_worker:
+    build:
+      context: ./services/agent_worker
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      MCP_SERVER_URL:    http://mcp_server:8002
+      KNOWLEDGE_API_URL: http://knowledge_api:8003
+      LITELLM_MODEL:     ${LITELLM_MODEL:-anthropic/claude-sonnet-4-6}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    depends_on:
+      - mcp_server
+      - knowledge_api
+    restart: unless-stopped
+
+  # ─── P04 Shared Integration (MCP Server) ───────────────────────────────────
+
+  mcp_server:
+    build:
+      context: ./services/mcp_server
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+
+  # ─── P05 Shared Knowledge / Memory / Model ─────────────────────────────────
+
+  knowledge_api:
+    build:
+      context: ./services/knowledge_api
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      POSTGRES_HOST:     postgres
+      POSTGRES_PORT:     5432
+      POSTGRES_DB:       agentic_ai
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+      REDIS_URL:         redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LITELLM_MODEL:     ${LITELLM_MODEL:-anthropic/claude-sonnet-4-6}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
