@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>블록 점프맵 - Roblox Style Obby</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #87CEEB; font-family: 'Segoe UI', sans-serif; }
+  #ui {
+    position: fixed; top: 16px; left: 16px; color: #fff; z-index: 10;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5); user-select: none;
+  }
+  #ui h1 { font-size: 22px; margin-bottom: 6px; }
+  #ui .stat { font-size: 18px; font-weight: 700; }
+  #ui .hint { font-size: 13px; opacity: 0.9; margin-top: 8px; line-height: 1.5; }
+  #win {
+    position: fixed; inset: 0; display: none; z-index: 20;
+    align-items: center; justify-content: center; flex-direction: column;
+    background: rgba(0,0,0,0.55); color: #fff; text-align: center;
+  }
+  #win h2 { font-size: 48px; margin-bottom: 12px; }
+  #win p { font-size: 20px; margin-bottom: 20px; }
+  #win button {
+    font-size: 18px; padding: 12px 28px; border: none; border-radius: 10px;
+    background: #00b06b; color: #fff; cursor: pointer; font-weight: 700;
+  }
+  #win button:hover { background: #00935a; }
+</style>
+</head>
+<body>
+  <div id="ui">
+    <h1>🟦 블록 점프맵</h1>
+    <div class="stat">⭐ 코인: <span id="coins">0</span> / <span id="total">0</span></div>
+    <div class="hint">
+      이동: <b>WASD</b> / 화살표 &nbsp;·&nbsp; 점프: <b>스페이스바</b><br/>
+      카메라 회전: <b>마우스 드래그</b><br/>
+      모든 코인을 먹고 <b>초록 깃발</b>에 도착하세요!
+    </div>
+  </div>
+
+  <div id="win">
+    <h2>🎉 클리어!</h2>
+    <p id="winText">축하합니다!</p>
+    <button onclick="location.reload()">다시 하기</button>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+  // ============ 기본 씬 세팅 ============
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87CEEB);
+  scene.fog = new THREE.Fog(0x87CEEB, 60, 140);
+
+  const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 500);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  // 조명
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+  sun.position.set(30, 60, 20);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
+  sun.shadow.camera.top = 80; sun.shadow.camera.bottom = -80;
+  scene.add(sun);
+
+  // ============ 플랫폼 만들기 ============
+  const platforms = [];
+  function addPlatform(x, y, z, w, h, d, color) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshLambertMaterial({ color })
+    );
+    mesh.position.set(x, y, z);
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    scene.add(mesh);
+    // 충돌 박스 정보 저장 (윗면 y, x/z 범위)
+    platforms.push({
+      minX: x - w/2, maxX: x + w/2,
+      minZ: z - d/2, maxZ: z + d/2,
+      top: y + h/2
+    });
+    return mesh;
+  }
+
+  // 시작 발판
+  addPlatform(0, 0, 0, 10, 1, 10, 0x4caf50);
+  // 점프 코스 (지그재그로 올라가는 발판들)
+  const course = [
+    [0, 1, -10, 6, 1, 6, 0xff6b6b],
+    [6, 2, -18, 5, 1, 5, 0xffd93d],
+    [0, 3, -26, 5, 1, 5, 0x6bcBef],
+    [-7, 4, -33, 4, 1, 4, 0xb06bff],
+    [-1, 5.5, -41, 4, 1, 4, 0xff9f43],
+    [6, 6.5, -48, 4, 1, 4, 0x1dd1a1],
+    [0, 8, -56, 5, 1, 5, 0xff6b6b],
+    [-6, 9, -64, 4, 1, 4, 0xfeca57],
+  ];
+  course.forEach(p => addPlatform(...p));
+  // 도착 발판
+  const goalPlat = addPlatform(0, 10, -72, 8, 1, 8, 0x2ecc71);
+
+  // 도착 깃발
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 6),
+    new THREE.MeshLambertMaterial({ color: 0x888888 }));
+  pole.position.set(0, 13.5, -72);
+  scene.add(pole);
+  const flag = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.5, 0.1),
+    new THREE.MeshLambertMaterial({ color: 0x2ecc71 }));
+  flag.position.set(1.25, 15.5, -72);
+  scene.add(flag);
+
+  // ============ 코인 ============
+  const coins = [];
+  const coinPositions = [
+    [0, 2.5, -10], [6, 3.5, -18], [0, 4.5, -26], [-7, 5.5, -33],
+    [-1, 7, -41], [6, 8, -48], [0, 9.5, -56], [-6, 10.5, -64],
+  ];
+  coinPositions.forEach(pos => {
+    const coin = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.7, 0.7, 0.2, 20),
+      new THREE.MeshLambertMaterial({ color: 0xffd700 })
+    );
+    coin.rotation.x = Math.PI / 2;
+    coin.position.set(...pos);
+    coin.castShadow = true;
+    scene.add(coin);
+    coins.push(coin);
+  });
+  const totalCoins = coins.length;
+  document.getElementById('total').textContent = totalCoins;
+  let collected = 0;
+
+  // ============ 플레이어 (블록 캐릭터) ============
+  const player = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1.2, 0.6),
+    new THREE.MeshLambertMaterial({ color: 0x3498db }));
+  body.position.y = 1; body.castShadow = true; player.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8),
+    new THREE.MeshLambertMaterial({ color: 0xffdd99 }));
+  head.position.y = 2; head.castShadow = true; player.add(head);
+  const legGeo = new THREE.BoxGeometry(0.4, 0.8, 0.5);
+  const legMat = new THREE.MeshLambertMaterial({ color: 0x2c3e50 });
+  const legL = new THREE.Mesh(legGeo, legMat); legL.position.set(-0.28, 0.0, 0); player.add(legL);
+  const legR = new THREE.Mesh(legGeo, legMat); legR.position.set(0.28, 0.0, 0); player.add(legR);
+  scene.add(player);
+
+  // 플레이어 상태
+  const pos = new THREE.Vector3(0, 1, 0);
+  const vel = new THREE.Vector3(0, 0, 0);
+  let onGround = false;
+  let facing = 0;
+
+  // ============ 입력 ============
+  const keys = {};
+  addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'Space') e.preventDefault();
+  });
+  addEventListener('keyup', e => keys[e.code] = false);
+
+  // 마우스로 카메라 회전
+  let camAngle = 0, camPitch = 0.35, dragging = false, lastX = 0, lastY = 0;
+  renderer.domElement.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  addEventListener('mouseup', () => dragging = false);
+  addEventListener('mousemove', e => {
+    if (!dragging) return;
+    camAngle -= (e.clientX - lastX) * 0.005;
+    camPitch = Math.max(0.05, Math.min(1.2, camPitch + (e.clientY - lastY) * 0.005));
+    lastX = e.clientX; lastY = e.clientY;
+  });
+
+  // ============ 물리 / 게임 루프 ============
+  const SPEED = 0.18, JUMP = 0.42, GRAVITY = 0.022;
+  let won = false;
+
+  function update() {
+    // 카메라 기준 이동 방향
+    const forward = new THREE.Vector3(Math.sin(camAngle), 0, Math.cos(camAngle));
+    const right = new THREE.Vector3(forward.z, 0, -forward.x);
+    let move = new THREE.Vector3();
+    if (keys['KeyW'] || keys['ArrowUp'])    move.sub(forward);
+    if (keys['KeyS'] || keys['ArrowDown'])  move.add(forward);
+    if (keys['KeyA'] || keys['ArrowLeft'])  move.sub(right);
+    if (keys['KeyD'] || keys['ArrowRight']) move.add(right);
+
+    if (move.lengthSq() > 0) {
+      move.normalize();
+      vel.x = move.x * SPEED;
+      vel.z = move.z * SPEED;
+      facing = Math.atan2(move.x, move.z);
+    } else {
+      vel.x *= 0.8; vel.z *= 0.8;
+    }
+
+    // 점프
+    if ((keys['Space']) && onGround) { vel.y = JUMP; onGround = false; }
+
+    // 중력
+    vel.y -= GRAVITY;
+
+    // 위치 갱신
+    pos.x += vel.x; pos.z += vel.z; pos.y += vel.y;
+
+    // 발판 충돌 (떨어질 때만 윗면 체크)
+    onGround = false;
+    for (const p of platforms) {
+      if (pos.x >= p.minX && pos.x <= p.maxX && pos.z >= p.minZ && pos.z <= p.maxZ) {
+        if (vel.y <= 0 && pos.y <= p.top + 0.1 && pos.y >= p.top - 0.6) {
+          pos.y = p.top; vel.y = 0; onGround = true;
+        }
+      }
+    }
+
+    // 낙사하면 시작점으로 리셋
+    if (pos.y < -15) { pos.set(0, 1, 0); vel.set(0, 0, 0); }
+
+    // 플레이어 적용
+    player.position.copy(pos);
+    player.rotation.y = facing;
+
+    // 걷기 다리 애니메이션
+    const t = Date.now() * 0.012;
+    const walking = (Math.abs(vel.x) + Math.abs(vel.z)) > 0.02 && onGround;
+    legL.rotation.x = walking ? Math.sin(t) * 0.6 : 0;
+    legR.rotation.x = walking ? -Math.sin(t) * 0.6 : 0;
+
+    // 코인 회전 + 획득 판정
+    for (let i = coins.length - 1; i >= 0; i--) {
+      const c = coins[i];
+      c.rotation.z += 0.05;
+      if (c.position.distanceTo(new THREE.Vector3(pos.x, pos.y + 1, pos.z)) < 1.4) {
+        scene.remove(c); coins.splice(i, 1);
+        collected++;
+        document.getElementById('coins').textContent = collected;
+      }
+    }
+
+    // 깃발 펄럭임
+    flag.scale.x = 1 + Math.sin(Date.now() * 0.005) * 0.1;
+
+    // 승리 판정 (도착 발판 도달 + 모든 코인)
+    if (!won && Math.abs(pos.x) < 4 && pos.z < -68 && pos.y > 9) {
+      if (collected >= totalCoins) {
+        won = true;
+        document.getElementById('winText').textContent =
+          `모든 코인 ${totalCoins}개를 모으고 결승점에 도착했어요!`;
+        document.getElementById('win').style.display = 'flex';
+      }
+    }
+
+    // 카메라 추적
+    const camDist = 12;
+    camera.position.set(
+      pos.x + Math.sin(camAngle) * camDist * Math.cos(camPitch),
+      pos.y + 4 + Math.sin(camPitch) * camDist,
+      pos.z + Math.cos(camAngle) * camDist * Math.cos(camPitch)
+    );
+    camera.lookAt(pos.x, pos.y + 1.5, pos.z);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (!won) update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+  </script>
+</body>
+</html>
